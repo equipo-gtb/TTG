@@ -1,11 +1,11 @@
 // src/pages/Dashboard.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react"; // 🔧 useMemo
 import { getTerritoriosList } from "../services/territories";
 import { getEntregas } from "../services/deliverys";
 import type { Territory } from "../types/territory";
 import type { Delivery } from "../types/delivery";
 import { differenceInDays, parseISO, format } from "date-fns";
-import { exportHistoryExcel } from '../utils/exportHistoryExcel'
+import { exportHistoryExcel } from "../utils/exportHistoryExcel";
 
 export default function Dashboard() {
   const [territorios, setTerritorios] = useState<Territory[]>([]);
@@ -16,29 +16,42 @@ export default function Dashboard() {
       .then(setTerritorios)
       .catch(console.error);
 
-    // Cargar últimas 10 entradas de historial
+    // 🔧: quita el .slice(0, 10) para traerlos todos
     getEntregas()
-      .then(data => setHistorial(data.slice(0, 10)))
+      .then((data) => {
+        // por si acaso, ordénalos por fecha de creación desc
+        const sorted = [...data].sort(
+          (a, b) =>
+            new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime()
+        );
+        setHistorial(sorted);
+      })
       .catch(console.error);
   }, []);
 
+  // 🔧: mapa uuid -> numero para mostrar el número de territorio en la tabla
+  const numeroPorId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of territorios) {
+      if (t.id && typeof t.numero === "number") map.set(t.id, t.numero);
+    }
+    return map;
+  }, [territorios]);
+
   const total = territorios.length;
-  const disponibles = territorios.filter(t => t.estado === "disponible").length;
-  const enUso = territorios.filter(t => t.estado === "en_uso").length;
-  const inhabilitados = territorios.filter(t => t.estado === "inhabilitado").length;
-  const caducados = territorios.filter(t => t.estado === "caducado").length;
-  const especiales = territorios.filter(t => t.estado === "especial").length;
+  const disponibles = territorios.filter((t) => t.estado === "disponible").length;
+  const enUso = territorios.filter((t) => t.estado === "en_uso").length;
+  const inhabilitados = territorios.filter((t) => t.estado === "inhabilitado").length;
+  const caducados = territorios.filter((t) => t.estado === "caducado").length;
+  const especiales = territorios.filter((t) => t.estado === "especial").length;
 
   const proximosVencimientos = territorios
-    .filter(t => t.estado === "en_uso" && t.fecha_devolucion)
-    .map(t => {
-      const diasRestantes = differenceInDays(
-        parseISO(t.fecha_devolucion!),
-        new Date()
-      );
+    .filter((t) => t.estado === "en_uso" && t.fecha_devolucion)
+    .map((t) => {
+      const diasRestantes = differenceInDays(parseISO(t.fecha_devolucion!), new Date());
       return { ...t, diasRestantes };
     })
-    .filter(t => t.diasRestantes >= 0 && t.diasRestantes <= 7)
+    .filter((t) => t.diasRestantes >= 0 && t.diasRestantes <= 7)
     .sort((a, b) => a.diasRestantes - b.diasRestantes);
 
   return (
@@ -50,7 +63,12 @@ export default function Dashboard() {
 
         {/* Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-8">
-          <SummaryCard color="blue" label="Total" value={total} icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7l9-4 9 4v13a2 2 0 0 1-2 2h-5m-4 0H5a2 2 0 0 1-2-2z" />} />
+          <SummaryCard
+            color="blue"
+            label="Total"
+            value={total}
+            icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7l9-4 9 4v13a2 2 0 0 1-2 2h-5m-4 0H5a2 2 0 0 1-2-2z" />}
+          />
           <SummaryCard color="green" label="Disponibles" value={disponibles} icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4" />} />
           <SummaryCard color="yellow" label="En Uso" value={enUso} icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />} />
           <SummaryCard color="red" label="Inhabilitados" value={inhabilitados} icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01" />} />
@@ -67,26 +85,20 @@ export default function Dashboard() {
         {/* Vencimientos próximos */}
         {proximosVencimientos.length > 0 && (
           <section className="mt-10">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">
-              Vencimientos Próximos
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Vencimientos Próximos</h3>
             <div className="space-y-3">
               {proximosVencimientos.map((t) => (
-                <div
-                  key={t.id}
-                  className="bg-yellow-50 text-gray-800 p-4 rounded-lg flex items-center justify-between"
-                >
+                <div key={t.id} className="bg-yellow-50 text-gray-800 p-4 rounded-lg flex items-center justify-between">
                   <div>
                     <p className="font-semibold">
-                      Territorio #{t.numero}{t.usuario_asignado?.nombre ? ` - ${t.usuario_asignado.nombre}` : ""}
+                      Territorio #{t.numero}
+                      {t.usuario_asignado?.nombre ? ` - ${t.usuario_asignado.nombre}` : ""}
                     </p>
                     <p className="text-sm">
                       Vence en {t.diasRestantes} día{t.diasRestantes !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <div className="font-medium">
-                    {t.usuario_asignado?.nombre ?? "Sin asignar"}
-                  </div>
+                  <div className="font-medium">{t.usuario_asignado?.nombre ?? "Sin asignar"}</div>
                   <div className="text-yellow-600 font-bold text-xl">!</div>
                 </div>
               ))}
@@ -105,9 +117,7 @@ export default function Dashboard() {
 
         {/* Historial reciente */}
         <section className="mt-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">
-            Historial Reciente
-          </h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Historial Reciente</h3>
           <div className="relative overflow-x-auto shadow-md sm:rounded-lg">
             <table className="w-full text-sm text-left text-gray-500">
               <thead className="text-xs text-gray-700 uppercase bg-gray-50">
@@ -122,17 +132,26 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {historial.map((r) => (
-                  <tr key={r.id} className="bg-white border-b hover:bg-gray-50">
-                    <td className="px-6 py-4 font-medium text-gray-900">#{r.territorio_id.slice(0, 4)}</td>
-                    <td className="px-6 py-4">{r.usuario_id.nombre}</td>
-                    <td className="px-6 py-4">{format(new Date(r.fecha_entrega), "dd/MM/yyyy")}</td>
-                    <td className="px-6 py-4">{r.fecha_devolucion ? format(new Date(r.fecha_devolucion), "dd/MM/yyyy") : "-"}</td>
-                    <td className="px-6 py-4">{r.estado_territorio}</td>
-                    <td className="px-6 py-4">{r.comentarios ?? "-"}</td>
-                    <td className="px-6 py-4">{format(new Date(r.creado_en), "dd/MM/yyyy HH:mm")}</td>
-                  </tr>
-                ))}
+                {historial.map((r) => {
+                  // 🔧: muestra el número del territorio si lo tenemos; si no, fallback al prefijo del uuid
+                  const numero = numeroPorId.get(r.territorio_id as unknown as string);
+                  const territorioLabel = typeof numero === "number" ? `#${numero}` : `#${String(r.territorio_id).slice(0, 4)}`;
+                  return (
+                    <tr key={r.id} className="bg-white border-b hover:bg-gray-50">
+                      <td className="px-6 py-4 font-medium text-gray-900">{territorioLabel}</td>
+                      <td className="px-6 py-4">{r.usuario_id?.nombre ?? "-"}</td>
+                      <td className="px-6 py-4">
+                        {r.fecha_entrega ? format(new Date(r.fecha_entrega), "dd/MM/yyyy") : "-"}
+                      </td>
+                      <td className="px-6 py-4">
+                        {r.fecha_devolucion ? format(new Date(r.fecha_devolucion), "dd/MM/yyyy") : "-"}
+                      </td>
+                      <td className="px-6 py-4">{r.estado_territorio}</td>
+                      <td className="px-6 py-4">{r.comentarios ?? "-"}</td>
+                      <td className="px-6 py-4">{format(new Date(r.creado_en), "dd/MM/yyyy HH:mm")}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

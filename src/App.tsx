@@ -30,7 +30,7 @@ function App() {
                       d="M3 7l9-4 9 4v13a2 2 0 0 1-2 2h-5m-4 0H5a2 2 0 0 1-2-2z"
                     />
                   </svg>
-                  GTTG
+                  GTB
                 </div>
               </div>
             </div>

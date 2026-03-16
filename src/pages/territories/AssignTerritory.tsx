@@ -73,9 +73,11 @@ export default function AssignTerritory() {
 
     const message = `_¡Hola ${selectedUserObj.nombre}!_\n\n` +
       `Te hemos asignado el territorio # *${territorio.numero}*.\n\n` +
-      `📅 *Fecha de entrega:* ${fechaEntrega}\n` +
-      `📅 *Fecha límite de finalización:* ${fechaDev}\n` +
+      `*📆 Fecha de entrega:* ${fechaEntrega}\n` +
+      `*📆 Fecha límite de finalización:* ${fechaDev}\n\n` +
+      `*_Sí lo finalizas antes de la fecha indicada por favor avisar para registrarlo_* \n\n` +
       `${territorio.imagen_url ? `\n🔍 *Para ver territorio en formato PDF 📄 toca el siguiente enlace:* ${territorio.imagen_url}\n` : ''}` +
+      `*Si no puedes ver el enlace con el PDF, avisar para enviar el archivo por separado* \n\n` +
       `Un saludo 👋`;
 
     const encodedMessage = encodeURIComponent(message);
