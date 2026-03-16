@@ -1,5 +1,5 @@
 // src/App.tsx
-import { Routes, Route } from "react-router-dom"; // <--- Quité BrowserRouter de aquí
+import { Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import UsersPage from "./pages/users/UserPages";
 import AssignTerritory from "./pages/territories/AssignTerritory";
@@ -9,7 +9,6 @@ import TerritoriesPage from "./pages/territories/TerritoriesPage";
 
 function App() {
   return (
-    // <--- Quité la etiqueta <BrowserRouter>
     <div className="min-h-screen bg-gray-100 text-gray-800">
       <nav className="bg-white shadow mb-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -46,7 +45,6 @@ function App() {
         </Route>
       </Routes>
     </div>
-    // <--- Quité la etiqueta </BrowserRouter>
   );
 }
 
