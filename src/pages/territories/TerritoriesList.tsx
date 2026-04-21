@@ -19,7 +19,7 @@ function estadoBadgeClasses(estado: string) {
     case "disponible":
       return "bg-green-100 text-green-700 border-green-200";
     case "inhabilitado":
-    case "habilitado": // alias tolerado
+    case "habilitado":
       return "bg-gray-200 text-gray-700 border-gray-300";
     case "especial":
       return "bg-indigo-100 text-indigo-700 border-indigo-200";
@@ -27,6 +27,7 @@ function estadoBadgeClasses(estado: string) {
       return "bg-slate-100 text-slate-700 border-slate-200";
   }
 }
+
 const normalizeEstado = (s?: string) =>
   s === "habilitado" ? "inhabilitado" : s ?? "";
 
@@ -45,6 +46,10 @@ export default function TerritoriesList() {
   // Filtro por estado
   const [filterEstado, setFilterEstado] = useState<string>("todos");
 
+  // 🔧 LOGICA DE PAGINACIÓN
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   useEffect(() => {
     load();
   }, []);
@@ -54,6 +59,22 @@ export default function TerritoriesList() {
     setTerritorios(data);
     setSelectedIds(new Set());
     setEditingId(null);
+  }
+
+  // 🔧 FUNCIÓN TÉCNICA: Habilitar territorio (Limpia historial actual y descansos)
+  async function forceEnable(t: Territory) {
+    if (!confirm(`¿Habilitar territorio #${t.numero} inmediatamente? Esto borrará el periodo de descanso y lo dejará disponible.`)) return;
+    
+    const payload: Partial<Territory> = {
+      estado: "disponible",
+      fecha_entrega: null,
+      fecha_caducidad: null,
+      descansa_hasta: null, // Rompe la regla de los 6 meses de Supabase
+      usuario_asignado: null, // Limpia la relación con el último usuario
+    };
+
+    await updateTerritorio(t.id, payload);
+    load();
   }
 
   function toggleSelect(id: string) {
@@ -86,7 +107,6 @@ export default function TerritoriesList() {
         return;
       }
     }
-
     const shouldForceCaducado =
       applyCaducado &&
       !!editFechaCaducidad &&
@@ -97,15 +117,19 @@ export default function TerritoriesList() {
     const payload: Partial<Territory> = {
       numero: editNumero,
       estado: finalEstado,
-      fecha_entrega: editFechaEntrega || null,
-      fecha_caducidad: editFechaCaducidad || null,
+      fecha_entrega: editEstado === "disponible" ? null : editFechaEntrega || null,
+      fecha_caducidad: editEstado === "disponible" ? null : editFechaCaducidad || null,
     };
+
+    // Si guardas como disponible, limpiamos el descanso para evitar que Supabase lo bloquee
+    if (editEstado === "disponible") {
+      payload.descansa_hasta = null;
+    }
 
     await updateTerritorio(id, payload);
     load();
   }
 
-  // Opciones de filtro (base + lo que venga de BD)
   const estadoOptions = useMemo(() => {
     const base = ["en_uso", "disponible", "inhabilitado", "caducado", "especial"];
     const fromData = Array.from(new Set(territorios.map(t => t.estado))).filter(Boolean);
@@ -114,26 +138,24 @@ export default function TerritoriesList() {
     return all;
   }, [territorios]);
 
-  // Lista filtrada
   const filteredTerritorios = useMemo(() => {
     if (filterEstado === "todos") return territorios;
     const target = normalizeEstado(filterEstado);
     return territorios.filter(t => normalizeEstado(t.estado) === target);
   }, [territorios, filterEstado]);
 
-  // Reset selección al cambiar filtro
+  const totalPages = Math.ceil(filteredTerritorios.length / itemsPerPage);
+  const currentTerritorios = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredTerritorios.slice(start, start + itemsPerPage);
+  }, [filteredTerritorios, currentPage]);
+
   useEffect(() => {
     setSelectedIds(new Set());
+    setCurrentPage(1);
   }, [filterEstado]);
 
-  // Chip helper
-  const Chip = ({
-    value,
-    label,
-  }: {
-    value: string;
-    label?: string;
-  }) => {
+  const Chip = ({ value, label }: { value: string; label?: string }) => {
     const active = filterEstado === value;
     return (
       <button
@@ -141,11 +163,8 @@ export default function TerritoriesList() {
         onClick={() => setFilterEstado(value)}
         className={[
           "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition",
-          active
-            ? "bg-indigo-600 text-white border-indigo-600 shadow"
-            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+          active ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
         ].join(" ")}
-        title={`Filtrar: ${label ?? value}`}
       >
         {label ?? value}
       </button>
@@ -153,21 +172,19 @@ export default function TerritoriesList() {
   };
 
   return (
-    <div className="relative overflow-x-auto shadow-sm sm:rounded-2xl">
-      {/* Toolbar bonita */}
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {/* Bloque de filtro */}
+    <div className="relative shadow-sm sm:rounded-2xl pb-10">
+      {/* Toolbar */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-1">
         <div className="w-full sm:w-auto bg-white border border-slate-200 rounded-xl shadow-sm p-3">
           <div className="flex flex-wrap items-center gap-3">
-            {/* Select con chevron */}
-            <div className="min-w-[240px]">
+            <div className="min-w-full sm:min-w-[240px]">
               <label htmlFor="estadoFilter" className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">
                 Filtrar por estado
               </label>
               <div className="relative">
                 <select
                   id="estadoFilter"
-                  className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-9 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                  className="w-full appearance-none rounded-lg border border-slate-300 bg-white px-3 py-2 pr-9 text-sm text-slate-800 focus:ring-2 focus:ring-indigo-200 outline-none"
                   value={filterEstado}
                   onChange={(e) => setFilterEstado(e.target.value)}
                 >
@@ -176,247 +193,216 @@ export default function TerritoriesList() {
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </select>
-                {/* chevron */}
-                <svg
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"
-                  viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
-                >
-                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.127l3.71-3.896a.75.75 0 111.08 1.04l-4.24 4.46a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                </svg>
               </div>
             </div>
-
-            {/* Chips de acceso rápido */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Chip value="en_uso" />
               <Chip value="disponible" />
-              <Chip value="inhabilitado" label="inhabilitado" />
+              <Chip value="inhabilitado" />
             </div>
-
-            {/* Limpiar + contador */}
             <div className="ml-auto flex items-center gap-3">
-              {filterEstado !== "todos" && (
-                <button
-                  className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
-                  onClick={() => setFilterEstado("todos")}
-                >
-                  {/* icono X */}
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  limpiar
-                </button>
-              )}
               <span className="text-xs text-slate-500">
-                Mostrando <span className="font-semibold text-slate-700">{filteredTerritorios.length}</span> de {territorios.length}
+                Mostrando <span className="font-semibold text-slate-700">{filteredTerritorios.length}</span>
               </span>
             </div>
           </div>
         </div>
 
-        {/* Botón borrar seleccionados */}
         <button
           onClick={handleBulkDelete}
           disabled={selectedIds.size === 0}
-          className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-rose-700 disabled:opacity-50 transition-colors"
         >
-          {/* trash icon simple */}
           <svg className="mr-1.5 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 6h18M9 6v12m6-12v12M5 6l1 14a2 2 0 002 2h8a2 2 0 002-2l1-14M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
           </svg>
-          Borrar seleccionados
+          Borrar ({selectedIds.size})
         </button>
       </div>
 
-      {/* Tabla */}
-      <table className="w-full text-sm text-left text-slate-600">
-        <thead className="text-xs uppercase bg-slate-800 text-slate-100">
-          <tr>
-            <th scope="col" className="p-4">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  onChange={(e) => {
-                    if (e.target.checked)
-                      setSelectedIds(new Set(filteredTerritorios.map((t) => t.id)));
-                    else setSelectedIds(new Set());
-                  }}
-                  checked={
-                    filteredTerritorios.length > 0 &&
-                    filteredTerritorios.every(t => selectedIds.has(t.id))
-                  }
-                  aria-label="Seleccionar todos los visibles"
-                />
-              </div>
-            </th>
-            <th className="px-6 py-3">Número</th>
-            <th className="px-6 py-3">Estado</th>
-            <th className="px-6 py-3">Asignado a</th>
-            <th className="px-6 py-3">Entregado</th>
-            <th className="px-6 py-3">Caduca</th>
-            <th className="px-6 py-3">Descansa hasta</th>
-            <th className="px-6 py-3">Comentarios</th>
-            <th className="px-6 py-3">Acciones</th>
-          </tr>
-        </thead>
-
-        <tbody className="bg-white">
-          {filteredTerritorios.map((t) => {
-            const isEditing = editingId === t.id;
-            const showCaducadoWarning =
-              isEditing &&
-              !!editFechaCaducidad &&
-              isBefore(new Date(editFechaCaducidad), startOfDay(new Date())) &&
-              editEstado !== "caducado";
-
-            return (
-              <tr key={t.id} className="border-b last:border-b-0 hover:bg-slate-50">
-                {/* Checkbox fila */}
-                <td className="w-4 p-4">
+      {/* --- VISTA RESPONSIVE (CARDS) --- */}
+      <div className="grid grid-cols-1 gap-4 md:hidden px-1">
+        {currentTerritorios.map((t) => {
+          const isEditing = editingId === t.id;
+          return (
+            <div key={t.id} className={`bg-white p-4 rounded-xl border ${selectedIds.has(t.id) ? 'border-indigo-500 ring-1 ring-indigo-500 shadow-md' : 'border-slate-200'} shadow-sm`}>
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center gap-3">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    className="h-5 w-5 rounded border-slate-300 text-indigo-600"
                     checked={selectedIds.has(t.id)}
                     onChange={() => toggleSelect(t.id)}
                   />
-                </td>
-
-                {/* Número */}
-                <td className="px-6 py-4 font-medium text-slate-900">
                   {isEditing ? (
                     <input
                       type="number"
-                      className="w-28 rounded-md border border-slate-300 px-2 py-1 text-sm shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                      className="w-20 rounded border border-slate-300 px-2 py-1 text-sm font-bold shadow-sm outline-none"
                       value={editNumero}
                       onChange={(e) => setEditNumero(+e.target.value)}
                     />
                   ) : (
-                    t.numero
+                    <span className="text-lg font-bold text-slate-900">#{t.numero}</span>
                   )}
-                </td>
-
-                {/* Estado */}
-                <td className="px-6 py-4">
-                  {isEditing ? (
-                    <select
-                      className="rounded-md border border-slate-300 px-2 py-1 text-sm shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 disabled:opacity-50"
-                      value={editEstado}
-                      onChange={(e) => setEditEstado(e.target.value)}
-                      disabled={applyCaducado}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-bold uppercase ${estadoBadgeClasses(t.estado)}`}>
+                    {t.estado}
+                  </span>
+                  {/* Botón Habilitar ya (Móvil) */}
+                  {!isEditing && t.estado === "inhabilitado" && (
+                    <button 
+                      onClick={() => forceEnable(t)}
+                      className="text-[10px] font-bold text-green-600 bg-green-50 border border-green-200 px-2 py-1 rounded shadow-sm"
                     >
-                      {estadoOptions.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span
-                      className={
-                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium " +
-                        estadoBadgeClasses(t.estado)
-                      }
-                      title={t.estado}
-                    >
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                      {t.estado}
-                    </span>
+                      Habilitar ya
+                    </button>
                   )}
-                </td>
+                </div>
+              </div>
 
-                {/* Asignado a */}
-                <td className="px-6 py-4">{t.usuario_asignado?.nombre ?? "-"}</td>
-
-                {/* Entregado */}
-                <td className="px-6 py-4">
+              <div className="space-y-2 text-sm text-slate-600 mb-4 px-2">
+                <div className="flex justify-between font-medium"><span className="text-slate-400 font-normal">Asignado a:</span> {t.usuario_asignado?.nombre ?? "-"}</div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Entrega:</span>
                   {isEditing ? (
-                    <input
-                      type="date"
-                      className="rounded-md border border-slate-300 px-2 py-1 text-sm shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-                      value={editFechaEntrega}
-                      onChange={(e) => setEditFechaEntrega(e.target.value)}
-                    />
-                  ) : t.fecha_entrega ? (
-                    format(new Date(t.fecha_entrega), "dd/MM/yyyy")
+                    <input type="date" className="text-xs border rounded px-1" value={editFechaEntrega} onChange={(e) => setEditFechaEntrega(e.target.value)} />
                   ) : (
-                    "-"
+                    <span>{t.fecha_entrega ? format(new Date(t.fecha_entrega), "dd/MM/yyyy") : "-"}</span>
                   )}
-                </td>
-
-                {/* Caduca + aviso + checkbox */}
-                <td className="px-6 py-4">
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Caduca:</span>
                   {isEditing ? (
-                    <>
-                      <input
-                        type="date"
-                        className="rounded-md border border-slate-300 px-2 py-1 text-sm shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-                        value={editFechaCaducidad}
-                        onChange={(e) => setEditFechaCaducidad(e.target.value)}
-                      />
-                      {showCaducadoWarning && (
-                        <div className="mt-1">
-                          <p className="text-xs text-amber-600">
-                            Sugerencia: con esta fecha el territorio estaría <strong>caducado</strong>.
-                          </p>
-                          <label className="mt-1 flex items-center gap-2 text-xs text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={applyCaducado}
-                              onChange={(e) => setApplyCaducado(e.target.checked)}
-                            />
-                            Aplicar y marcar como <strong>caducado</strong> al guardar
-                          </label>
-                        </div>
+                    <input type="date" className="text-xs border rounded px-1" value={editFechaCaducidad} onChange={(e) => setEditFechaCaducidad(e.target.value)} />
+                  ) : (
+                    <span>{t.fecha_caducidad ? format(new Date(t.fecha_caducidad), "dd/MM/yyyy") : "-"}</span>
+                  )}
+                </div>
+                <div className="flex justify-between font-medium"><span className="text-slate-400 font-normal">Descansa:</span> <span>{t.descansa_hasta ? format(new Date(t.descansa_hasta), "dd/MM/yyyy") : "-"}</span></div>
+              </div>
+
+              <div className="flex justify-end gap-4 pt-2 border-t border-slate-100">
+                {isEditing ? (
+                  <>
+                    <button onClick={() => saveEdit(t.id)} className="text-indigo-600 font-bold text-sm">Guardar</button>
+                    <button onClick={() => setEditingId(null)} className="text-slate-500 text-sm">Cancelar</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(t)} className="text-indigo-600 font-medium text-sm">Editar</button>
+                    <button onClick={() => confirm("¿Borrar?") && deleteTerritorio(t.id).then(load)} className="text-rose-600 font-medium text-sm">Borrar</button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* --- VISTA DESKTOP (TABLA) --- */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm text-left text-slate-600">
+          <thead className="text-xs uppercase bg-slate-800 text-slate-100">
+            <tr>
+              <th className="p-4 text-center">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                  onChange={(e) => {
+                    if (e.target.checked) setSelectedIds(new Set(currentTerritorios.map((t) => t.id)));
+                    else setSelectedIds(new Set());
+                  }}
+                  checked={currentTerritorios.length > 0 && currentTerritorios.every(t => selectedIds.has(t.id))}
+                />
+              </th>
+              <th className="px-6 py-4 font-bold">Número</th>
+              <th className="px-6 py-4 font-bold">Estado</th>
+              <th className="px-6 py-4 font-bold">Asignado a</th>
+              <th className="px-6 py-4 font-bold">Entregado</th>
+              <th className="px-6 py-4 font-bold">Caduca</th>
+              <th className="px-6 py-4 font-bold text-center">Descansa</th>
+              <th className="px-6 py-4 font-bold text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white">
+            {currentTerritorios.map((t) => {
+              const isEditing = editingId === t.id;
+              return (
+                <tr key={t.id} className="border-b hover:bg-slate-50 transition-colors">
+                  <td className="w-4 p-4 text-center">
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-indigo-600" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
+                  </td>
+                  <td className="px-6 py-4 font-bold text-slate-900">
+                    {isEditing ? <input type="number" className="w-20 rounded border border-slate-300 px-2 py-1 outline-none" value={editNumero} onChange={(e) => setEditNumero(+e.target.value)} /> : t.numero}
+                  </td>
+                  <td className="px-6 py-4">
+                    {isEditing ? (
+                      <select className="rounded border border-slate-300 px-2 py-1 outline-none" value={editEstado} onChange={(e) => setEditEstado(e.target.value)}>
+                        {estadoOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium ${estadoBadgeClasses(t.estado)}`}>
+                        {t.estado}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 font-medium">{t.usuario_asignado?.nombre ?? "-"}</td>
+                  <td className="px-6 py-4">
+                    {isEditing ? <input type="date" className="border rounded px-2 py-1 text-xs" value={editFechaEntrega} onChange={(e) => setEditFechaEntrega(e.target.value)} /> : (t.fecha_entrega ? format(new Date(t.fecha_entrega), "dd/MM/yyyy") : "-")}
+                  </td>
+                  <td className="px-6 py-4">
+                    {isEditing ? <input type="date" className="border rounded px-2 py-1 text-xs" value={editFechaCaducidad} onChange={(e) => setEditFechaCaducidad(e.target.value)} /> : (t.fecha_caducidad ? format(new Date(t.fecha_caducidad), "dd/MM/yyyy") : "-")}
+                  </td>
+                  <td className="px-6 py-4 text-center font-medium text-slate-400">
+                    {t.descansa_hasta ? format(new Date(t.descansa_hasta), "dd/MM/yyyy") : "-"}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end gap-3">
+                      {isEditing ? (
+                        <button onClick={() => saveEdit(t.id)} className="text-indigo-600 font-bold hover:underline">Guardar</button>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(t)} className="text-indigo-600 hover:underline">Editar</button>
+                          {t.estado === "inhabilitado" && (
+                            <button onClick={() => forceEnable(t)} className="text-green-600 font-bold hover:underline">Habilitar</button>
+                          )}
+                        </>
                       )}
-                    </>
-                  ) : t.fecha_caducidad ? (
-                    format(new Date(t.fecha_caducidad), "dd/MM/yyyy")
-                  ) : (
-                    "-"
-                  )}
-                </td>
-
-                {/* Descansa hasta */}
-                <td className="px-6 py-4">
-                  {t.descansa_hasta ? format(new Date(t.descansa_hasta), "dd/MM/yyyy") : "-"}
-                </td>
-
-                {/* Comentarios */}
-                <td className="px-6 py-4">{t.comentarios ?? "-"}</td>
-
-                {/* Acciones */}
-                <td className="px-6 py-4">
-                  {isEditing ? (
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => saveEdit(t.id)} className="text-indigo-600 hover:underline">
-                        Guardar
-                      </button>
-                      <button onClick={() => setEditingId(null)} className="text-slate-600 hover:underline">
-                        Cancelar
-                      </button>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => startEdit(t)} className="text-indigo-600 hover:underline">
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("¿Borrar este territorio?")) {
-                            deleteTerritorio(t.id).then(load);
-                          }
-                        }}
-                        className="text-rose-600 hover:underline"
-                      >
-                        Borrar
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* --- PAGINACIÓN --- */}
+      <div className="mt-8 flex flex-col items-center gap-2">
+        <div className="inline-flex shadow-sm rounded-lg overflow-hidden border border-slate-300">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-4 py-2 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
+          >
+            Anterior
+          </button>
+          <div className="px-4 py-2 bg-white text-sm font-semibold border-x border-slate-300">
+            {currentPage} / {totalPages || 1}
+          </div>
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages || totalPages === 0}
+            className="px-4 py-2 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors"
+          >
+            Siguiente
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 italic">
+          Total de {filteredTerritorios.length} registros encontrados
+        </p>
+      </div>
     </div>
   );
 }
